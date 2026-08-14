@@ -50,7 +50,7 @@ async function rpcCall(apiKey, method, params) {
  * Ambil SEMUA signature yang menyentuh sebuah address, dengan pagination
  * (getSignaturesForAddress dibatasi 1000/request, pakai `before` buat lanjut).
  */
-async function getAllSignatures(apiKey, address, maxSignatures = 5000) {
+async function getAllSignatures(apiKey, address, maxSignatures = 20000) {
   const all = [];
   let before = undefined;
 
@@ -84,11 +84,20 @@ async function txTouchesPrograms(apiKey, signature, programIds) {
 
   if (!tx) return { found: false, blockTime: null };
 
-  const accountKeys = (tx.transaction?.message?.accountKeys ?? []).map((k) =>
+  const topLevelKeys = (tx.transaction?.message?.accountKeys ?? []).map((k) =>
     typeof k === "string" ? k : k.pubkey
   );
 
-  const found = programIds.some((id) => accountKeys.includes(id));
+  // PENTING: transaksi versi v0 bisa pakai Address Lookup Table (ALT) — program
+  // yang terlibat nggak selalu muncul di accountKeys biasa, tapi di loadedAddresses.
+  // Kalau ini dilewatkan, transaksi yang sebenarnya menyentuh program target bisa
+  // ke-anggap "tidak ditemukan" padahal sebenarnya ada.
+  const loadedWritable = tx.meta?.loadedAddresses?.writable ?? [];
+  const loadedReadonly = tx.meta?.loadedAddresses?.readonly ?? [];
+
+  const allKeys = [...topLevelKeys, ...loadedWritable, ...loadedReadonly];
+
+  const found = programIds.some((id) => allKeys.includes(id));
   return { found, blockTime: tx.blockTime ?? null };
 }
 
@@ -180,10 +189,24 @@ async function main() {
   } else {
     console.log(`❌ TIDAK ditemukan transaksi yang menyentuh program migrasi pump.fun`);
     console.log(`   (${MIGRATION_PROGRAM_ID}) dalam ${checked} transaksi yang dicek.`);
-    console.log(`\n   → Token ini kemungkinan besar BELUM migrasi (masih di bonding curve),`);
-    console.log(`     atau migrasi lewat mekanisme/program lain yang berbeda dari yang`);
-    console.log(`     bot ini dengarkan. Cek langsung https://pump.fun/coin/${mint}`);
-    console.log(`     untuk lihat status pastinya.`);
+
+    if (pumpswapTx) {
+      console.log(`\n   ⚠️  TAPI ditemukan transaksi yang menyentuh PumpSwap (${PUMPSWAP_PROGRAM_ID}):`);
+      console.log(`       Signature : ${pumpswapTx.signature}`);
+      console.log(`       Waktu     : ${fmtTime(pumpswapTx.blockTime)}`);
+      console.log(`       Link      : https://solscan.io/tx/${pumpswapTx.signature}`);
+      console.log(`\n   → Ini artinya token INI SUDAH trading di PumpSwap (jadi migrasi PASTI terjadi),`);
+      console.log(`     tapi transaksi migrasi spesifiknya tidak terdeteksi lewat program ID yang`);
+      console.log(`     di-hardcode di bot. Kemungkinan besar: token ini pakai jalur migrasi baru`);
+      console.log(`     pump.fun yang programnya berbeda dari MIGRATION_PROGRAM_ID lama, atau`);
+      console.log(`     transaksi migrasinya ada di luar ${checked} transaksi yang sempat dicek`);
+      console.log(`     (coba naikkan cap "maxSignatures" di script kalau token trading-nya rame).`);
+    } else {
+      console.log(`\n   → Token ini kemungkinan besar BELUM migrasi (masih di bonding curve),`);
+      console.log(`     atau migrasi lewat mekanisme/program lain yang berbeda dari yang`);
+      console.log(`     bot ini dengarkan. Cek langsung https://pump.fun/coin/${mint}`);
+      console.log(`     untuk lihat status pastinya.`);
+    }
   }
 
   console.log("");
