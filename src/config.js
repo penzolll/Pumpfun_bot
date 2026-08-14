@@ -29,3 +29,14 @@ export const TOKEN_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 menit
 
 // Seberapa sering cek token yang idle untuk di-cleanup.
 export const IDLE_CHECK_INTERVAL_MS = 60 * 1000; // 1 menit
+
+// Minimum liquidity (USD) sebuah token setelah migrasi supaya dianggap layak
+// ditrack & di-alert. Token dengan liquidity di bawah ini kemungkinan besar
+// "junk" — langsung dump abis migrasi (rug/insider dump), bukan worth-it.
+export const MIN_LIQUIDITY_USD = 1000;
+
+// Berapa kali coba cek liquidity ke DexScreener setelah migrasi terdeteksi.
+// Pool baru butuh beberapa detik buat ke-index, jadi kita retry beberapa kali
+// dengan jeda, bukan langsung nge-skip di percobaan pertama.
+export const LIQUIDITY_CHECK_RETRIES = 5;
+export const LIQUIDITY_CHECK_DELAY_MS = 5_000; // 5 detik antar percobaan
