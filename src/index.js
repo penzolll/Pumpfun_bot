@@ -7,6 +7,11 @@ import { parseTradeActivity } from "./tradeParser.js";
 import { sendTelegramAlert } from "./telegramClient.js";
 import { appendTokenRow, appendTradeRow } from "./sheetsClient.js";
 import { state } from "./stateManager.js";
+import {
+  MAX_ACTIVE_TOKENS,
+  TOKEN_IDLE_TIMEOUT_MS,
+  IDLE_CHECK_INTERVAL_MS,
+} from "./config.js";
 
 const API_KEY = process.env.HELIUS_API_KEY;
 
@@ -17,6 +22,29 @@ if (!API_KEY) {
 
 const connection = new HeliusConnection(API_KEY);
 connection.connect();
+
+// Map<tokenMint, localSubKey> — buat bisa unsubscribe pool-listener saat token
+// idle atau kena cap, tanpa perlu nebak-nebak localKey lagi.
+const tokenSubKeys = new Map();
+
+function stopTrackingToken(tokenMint, reason) {
+  const localKey = tokenSubKeys.get(tokenMint);
+  if (localKey) {
+    connection.unsubscribe(localKey);
+    tokenSubKeys.delete(tokenMint);
+  }
+  state.unregisterToken(tokenMint);
+  console.log(`[cleanup] Stop tracking ${tokenMint} (${reason})`);
+}
+
+// Cleanup berkala: token yang sudah lama tanpa trade otomatis di-unsubscribe
+// biar tidak numpuk bandwidth WebSocket.
+setInterval(() => {
+  const idleTokens = state.getIdleTokens(TOKEN_IDLE_TIMEOUT_MS);
+  for (const tokenMint of idleTokens) {
+    stopTrackingToken(tokenMint, "idle, tidak ada trade");
+  }
+}, IDLE_CHECK_INTERVAL_MS);
 
 startMigrationListener(connection, API_KEY, async (migration) => {
   console.log("==============================");
@@ -32,6 +60,15 @@ startMigrationListener(connection, API_KEY, async (migration) => {
     console.log(`[holder-snapshot] Mengambil holder awal untuk ${migration.tokenMint}...`);
     const holders = await getHolderSnapshot(migration.tokenMint, API_KEY);
     ticker = await getTokenMetadata(migration.tokenMint, API_KEY);
+
+    // Cap jumlah token aktif — kalau sudah penuh, drop token paling lama (FIFO)
+    // dulu sebelum daftarin yang baru. Manual trading nggak butuh mantau lebih
+    // dari MAX_ACTIVE_TOKENS token sekaligus.
+    while (state.size() >= MAX_ACTIVE_TOKENS) {
+      const oldest = state.getOldestTokenMint();
+      if (!oldest) break;
+      stopTrackingToken(oldest, "digantikan token baru (cap tercapai)");
+    }
 
     state.registerToken(migration.tokenMint, holders, ticker);
 
@@ -51,13 +88,15 @@ startMigrationListener(connection, API_KEY, async (migration) => {
   }
 
   // Subscribe ke aktivitas token ini di koneksi yang sama (instan, tidak buka koneksi baru)
-  subscribeToTokenActivity(connection, migration.tokenMint, async (logResult) => {
+  const localKey = subscribeToTokenActivity(connection, migration.tokenMint, async (logResult) => {
     const { signature, err } = logResult;
     if (err) return; // abaikan transaksi yang gagal on-chain
 
     try {
       const trade = await parseTradeActivity(signature, migration.tokenMint, API_KEY);
       if (!trade) return; // bukan trade (mis. cuma mention token tanpa transfer)
+
+      state.touchActivity(migration.tokenMint);
 
       const wasHolder = state.isHolder(migration.tokenMint, trade.wallet);
       const delta = trade.action === "buy" ? trade.amount : -trade.amount;
@@ -97,4 +136,6 @@ startMigrationListener(connection, API_KEY, async (migration) => {
       console.error(`[trade] Gagal parse ${signature}:`, err.message);
     }
   });
+
+  tokenSubKeys.set(migration.tokenMint, localKey);
 });
