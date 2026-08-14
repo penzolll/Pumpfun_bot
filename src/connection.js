@@ -64,6 +64,32 @@ export class HeliusConnection {
     // Kalau belum open, akan otomatis dikirim saat _resubscribeAll() dipanggil di event "open"
   }
 
+  /**
+   * Batalkan subscription yang sudah tidak dibutuhkan (mis. token yang sudah
+   * lama tidak ada aktivitas trading). Mengirim logsUnsubscribe ke server dan
+   * membuang entry-nya dari registry lokal.
+   * @param {string} localKey - key yang dipakai saat subscribe()
+   */
+  unsubscribe(localKey) {
+    const sub = this.subscriptions.get(localKey);
+    if (!sub) return;
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN && sub.subscriptionId != null) {
+      const requestId = this.nextRequestId++;
+      this.ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: requestId,
+          method: "logsUnsubscribe",
+          params: [sub.subscriptionId],
+        })
+      );
+    }
+
+    this.subscriptions.delete(localKey);
+    console.log(`[connection] Unsubscribe: ${localKey}`);
+  }
+
   _resubscribeAll() {
     for (const [localKey, sub] of this.subscriptions) {
       console.log(`[connection] Subscribe ulang: ${localKey}`);
