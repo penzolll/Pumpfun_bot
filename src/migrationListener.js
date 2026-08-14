@@ -1,4 +1,4 @@
-import { MIGRATION_PROGRAM_ID } from "./config.js";
+import { MIGRATION_PROGRAM_ID, KNOWN_BASE_MINTS } from "./config.js";
 import { fetchParsedTransaction } from "./heliusClient.js";
 
 /**
@@ -35,12 +35,23 @@ export function startMigrationListener(connection, apiKey, onMigrationDetected) 
         }
 
         // tokenTransfers berisi daftar transfer token dalam transaksi ini.
-        // Token mint yang relevan biasanya yang pertama muncul dengan jumlah signifikan.
+        // PENTING: transaksi migrasi juga menyertakan transfer WSOL (liquidity/fee),
+        // jadi tokenTransfers[0] BUKAN selalu token yang migrasi — harus skip base mint
+        // (SOL/USDC/dst) dan ambil mint pertama yang bukan base mint.
         const tokenTransfers = parsed.tokenTransfers ?? [];
-        const tokenMint = tokenTransfers[0]?.mint ?? null;
+        const tokenMint =
+          tokenTransfers.find((t) => t.mint && !KNOWN_BASE_MINTS.has(t.mint))?.mint ?? null;
 
         if (!tokenMint) {
           console.warn(`[migration] Tidak bisa ekstrak token mint dari ${signature}, lewati.`);
+          return;
+        }
+
+        // Pengaman tambahan: kalau somehow tetap kepilih base mint, jangan lanjut.
+        // Subscribe ke SOL/USDC bisa membanjiri koneksi karena mint ini nyaris ada
+        // di hampir semua transaksi Solana.
+        if (KNOWN_BASE_MINTS.has(tokenMint)) {
+          console.warn(`[migration] Terdeteksi base mint (${tokenMint}) di ${signature}, lewati — bukan token migrasi.`);
           return;
         }
 
