@@ -89,7 +89,7 @@ startMigrationListener(connection, API_KEY, async (migration) => {
 
   // Subscribe ke aktivitas token ini di koneksi yang sama (instan, tidak buka koneksi baru)
   const localKey = subscribeToTokenActivity(connection, migration.tokenMint, async (logResult) => {
-    const { signature, err } = logResult;
+    const { signature, err } = logResult.value;
     if (err) return; // abaikan transaksi yang gagal on-chain
 
     try {
