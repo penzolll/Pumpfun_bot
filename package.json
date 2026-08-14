@@ -1,0 +1,15 @@
+{
+  "name": "pumpfun-migration-bot",
+  "version": "1.0.0",
+  "description": "Deteksi migrasi token pump.fun, tracking holder, dan alert buy/sell",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0"
+  }
+}
