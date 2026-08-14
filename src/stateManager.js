@@ -6,7 +6,8 @@
  *   poolAddress: string | null,
  *   holders: Map<walletAddress, balance>,
  *   subscriptionId: number | null,
- *   createdAt: number
+ *   createdAt: number,
+ *   lastActivityAt: number
  * }>
  */
 class StateManager {
@@ -21,7 +22,43 @@ class StateManager {
       holders,
       subscriptionId: null,
       createdAt: Date.now(),
+      lastActivityAt: Date.now(),
     });
+  }
+
+  touchActivity(tokenMint) {
+    const token = this.activeTokens.get(tokenMint);
+    if (token) token.lastActivityAt = Date.now();
+  }
+
+  unregisterToken(tokenMint) {
+    this.activeTokens.delete(tokenMint);
+  }
+
+  /**
+   * Urutan tokenMint dari yang paling lama didaftarkan ke paling baru.
+   * Dipakai buat FIFO drop saat cap token aktif tercapai.
+   */
+  getOldestTokenMint() {
+    const first = this.activeTokens.keys().next();
+    return first.done ? null : first.value;
+  }
+
+  size() {
+    return this.activeTokens.size;
+  }
+
+  /**
+   * Ambil daftar tokenMint yang sudah tidak ada aktivitas trading
+   * selama lebih dari `maxIdleMs`.
+   */
+  getIdleTokens(maxIdleMs) {
+    const now = Date.now();
+    const idle = [];
+    for (const [tokenMint, token] of this.activeTokens) {
+      if (now - token.lastActivityAt > maxIdleMs) idle.push(tokenMint);
+    }
+    return idle;
   }
 
   getTicker(tokenMint) {
