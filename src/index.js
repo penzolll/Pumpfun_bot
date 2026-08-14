@@ -7,10 +7,12 @@ import { parseTradeActivity } from "./tradeParser.js";
 import { sendTelegramAlert } from "./telegramClient.js";
 import { appendTokenRow, appendTradeRow } from "./sheetsClient.js";
 import { state } from "./stateManager.js";
+import { waitForLiquidityInfo } from "./liquidityClient.js";
 import {
   MAX_ACTIVE_TOKENS,
   TOKEN_IDLE_TIMEOUT_MS,
   IDLE_CHECK_INTERVAL_MS,
+  MIN_LIQUIDITY_USD,
 } from "./config.js";
 
 const API_KEY = process.env.HELIUS_API_KEY;
@@ -55,6 +57,31 @@ startMigrationListener(connection, API_KEY, async (migration) => {
   console.log("==============================");
 
   let ticker = null;
+
+  // Cek liquidity dulu SEBELUM ambil holder snapshot — kalau token junk
+  // (liquidity kelewat kecil), skip di sini biar hemat API call juga.
+  console.log(`[liquidity] Mengecek liquidity untuk ${migration.tokenMint}...`);
+  const liquidityInfo = await waitForLiquidityInfo(migration.tokenMint);
+
+  if (!liquidityInfo) {
+    console.warn(
+      `[liquidity] Pool ${migration.tokenMint} belum ke-index / tidak ditemukan di DexScreener, lewati.`
+    );
+    return;
+  }
+
+  if (liquidityInfo.liquidityUsd < MIN_LIQUIDITY_USD) {
+    console.warn(
+      `[liquidity] ${migration.tokenMint} liquidity $${liquidityInfo.liquidityUsd.toFixed(2)} ` +
+        `di bawah minimum $${MIN_LIQUIDITY_USD}, lewati (kemungkinan junk/dump).`
+    );
+    return;
+  }
+
+  console.log(
+    `[liquidity] OK — $${liquidityInfo.liquidityUsd.toFixed(2)} liquidity` +
+      (liquidityInfo.marketCapUsd ? `, MC $${liquidityInfo.marketCapUsd.toFixed(2)}` : "")
+  );
 
   try {
     console.log(`[holder-snapshot] Mengambil holder awal untuk ${migration.tokenMint}...`);
