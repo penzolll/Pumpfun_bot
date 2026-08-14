@@ -136,35 +136,34 @@ async function main() {
   let migrationTx = null;
   let pumpswapTx = null;
   let checked = 0;
+  let stopped = false;
+  const CONCURRENCY = 8; // request paralel sekaligus, jauh lebih cepat dari sekuensial
 
-  for (const sig of signatures) {
-    checked++;
-    process.stdout.write(`\r      Progress: ${checked}/${signatures.length}`);
-
+  async function checkOne(sig) {
     try {
-      const { found, blockTime } = await txTouchesPrograms(apiKey, sig.signature, [
-        MIGRATION_PROGRAM_ID,
-        PUMPSWAP_PROGRAM_ID,
-      ]);
-
-      if (found) {
-        // Cek lebih spesifik program mana yang match
-        const detail = await txTouchesPrograms(apiKey, sig.signature, [MIGRATION_PROGRAM_ID]);
-        if (detail.found && !migrationTx) {
-          migrationTx = { signature: sig.signature, blockTime };
-        } else if (!pumpswapTx) {
-          pumpswapTx = { signature: sig.signature, blockTime };
+      const migResult = await txTouchesPrograms(apiKey, sig.signature, [MIGRATION_PROGRAM_ID]);
+      if (migResult.found && !migrationTx) {
+        migrationTx = { signature: sig.signature, blockTime: migResult.blockTime };
+        stopped = true;
+        return;
+      }
+      if (!pumpswapTx) {
+        const swapResult = await txTouchesPrograms(apiKey, sig.signature, [PUMPSWAP_PROGRAM_ID]);
+        if (swapResult.found) {
+          pumpswapTx = { signature: sig.signature, blockTime: swapResult.blockTime };
         }
       }
     } catch (err) {
-      // lewati transaksi yang gagal di-fetch, jangan hentikan seluruh scan
+      // lewati transaksi yang gagal di-fetch
     }
+    checked++;
+    process.stdout.write(`\r      Progress: ${checked}/${signatures.length}`);
+  }
 
-    await sleep(RPC_DELAY_MS);
-
-    // Optimisasi: kalau sudah ketemu migration tx, nggak perlu scan semua —
-    // cukup buat konfirmasi bahwa migrasi PERNAH terjadi.
-    if (migrationTx) break;
+  // Proses dalam batch paralel, berhenti secepatnya begitu migrationTx ketemu
+  for (let i = 0; i < signatures.length && !stopped; i += CONCURRENCY) {
+    const batch = signatures.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map((sig) => checkOne(sig)));
   }
 
   console.log("\n");
