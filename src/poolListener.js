@@ -17,7 +17,7 @@ export function subscribeToTokenActivity(connection, tokenMint, handler) {
 
   connection.subscribe(
     localKey,
-    [{ mentions: [tokenMint] }, { commitment: "processed" }],
+    [{ mentions: [tokenMint] }, { commitment: "confirmed" }],
     handler
   );
 
